@@ -1,21 +1,111 @@
 import sqlite3
 import os
+import re
 from datetime import datetime, date, timedelta
+
+# Check for online PostgreSQL Database URL (Supabase or Railway)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "kisansetu.db")
 
+class PostgresCursorWrapper:
+    """Wraps psycopg cursor so standard SQLite '?' queries and dict access work seamlessly."""
+    def __init__(self, raw_cursor):
+        self.cursor = raw_cursor
+
+    def execute(self, query, params=None):
+        # Translate '?' placeholders to '%s' for PostgreSQL
+        pg_query = query.replace("?", "%s")
+        # Handle SQLite AUTOINCREMENT -> PostgreSQL SERIAL syntax differences if any in dynamic DDL
+        pg_query = pg_query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+        
+        # In PostgreSQL, to get last inserted ID, append RETURNING id if INSERT
+        is_insert = pg_query.strip().upper().startswith("INSERT INTO")
+        if is_insert and "RETURNING id" not in pg_query.upper():
+            pg_query = pg_query.rstrip("; ") + " RETURNING id"
+
+        if params is not None:
+            if isinstance(params, (list, tuple)):
+                self.cursor.execute(pg_query, params)
+            else:
+                self.cursor.execute(pg_query, (params,))
+        else:
+            self.cursor.execute(pg_query)
+
+        if is_insert:
+            try:
+                row = self.cursor.fetchone()
+                self.lastrowid = row["id"] if isinstance(row, dict) else (row[0] if row else None)
+            except Exception:
+                self.lastrowid = None
+        else:
+            self.lastrowid = None
+        return self
+
+    def executemany(self, query, seq_of_params):
+        pg_query = query.replace("?", "%s")
+        return self.cursor.executemany(pg_query, seq_of_params)
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+
+    def __iter__(self):
+        return iter(self.cursor)
+
+class PostgresConnectionWrapper:
+    def __init__(self, raw_conn):
+        self.conn = raw_conn
+
+    def cursor(self):
+        return PostgresCursorWrapper(self.conn.cursor())
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
 def get_connection():
+    if DATABASE_URL:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+            raw = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+            return PostgresConnectionWrapper(raw)
+        except Exception as e:
+            print(f"[Warning] Failed to connect to PostgreSQL ({DATABASE_URL[:25]}...): {e}. Falling back to SQLite.")
+
+    # Default to Local SQLite
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+def is_postgres():
+    return bool(DATABASE_URL)
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. Users
+    # Create tables
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(20) UNIQUE NOT NULL,
+        role VARCHAR(20) NOT NULL,
+        language VARCHAR(10) DEFAULT 'hi',
+        created_at TEXT NOT NULL
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT UNIQUE NOT NULL,
@@ -25,8 +115,19 @@ def init_db():
     )
     """)
 
-    # 2. Farmers
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS farmers (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        name VARCHAR(100) NOT NULL,
+        mobile VARCHAR(20) NOT NULL,
+        village VARCHAR(100),
+        district VARCHAR(100),
+        identity_reference VARCHAR(50),
+        preferred_language VARCHAR(10) DEFAULT 'hi',
+        created_at TEXT NOT NULL
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS farmers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -41,8 +142,19 @@ def init_db():
     )
     """)
 
-    # 3. Centres
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS centres (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        code VARCHAR(10) UNIQUE NOT NULL,
+        address TEXT NOT NULL,
+        district VARCHAR(100) NOT NULL,
+        latitude REAL,
+        longitude REAL,
+        daily_capacity INTEGER DEFAULT 100,
+        active INTEGER DEFAULT 1
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS centres (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -56,8 +168,18 @@ def init_db():
     )
     """)
 
-    # 4. Slots
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS slots (
+        id SERIAL PRIMARY KEY,
+        centre_id INTEGER REFERENCES centres(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        start_time VARCHAR(10) NOT NULL,
+        end_time VARCHAR(10) NOT NULL,
+        capacity INTEGER DEFAULT 20,
+        booked_count INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'AVAILABLE'
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS slots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         centre_id INTEGER NOT NULL,
@@ -71,8 +193,18 @@ def init_db():
     )
     """)
 
-    # 5. Bookings
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS bookings (
+        id SERIAL PRIMARY KEY,
+        farmer_id INTEGER REFERENCES farmers(id) ON DELETE CASCADE,
+        centre_id INTEGER REFERENCES centres(id) ON DELETE CASCADE,
+        slot_id INTEGER REFERENCES slots(id) ON DELETE CASCADE,
+        token_number VARCHAR(50) UNIQUE NOT NULL,
+        booking_channel VARCHAR(20) NOT NULL,
+        booking_status VARCHAR(20) DEFAULT 'BOOKED',
+        created_at TEXT NOT NULL
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS bookings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         farmer_id INTEGER NOT NULL,
@@ -88,8 +220,19 @@ def init_db():
     )
     """)
 
-    # 6. Procurement Records
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS procurement_records (
+        id SERIAL PRIMARY KEY,
+        booking_id INTEGER UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
+        crop VARCHAR(50) NOT NULL,
+        quantity REAL DEFAULT 0.0,
+        quality_result VARCHAR(20) DEFAULT 'PENDING',
+        procurement_status VARCHAR(30) DEFAULT 'SLOT_BOOKED',
+        quality_notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS procurement_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         booking_id INTEGER UNIQUE NOT NULL,
@@ -110,8 +253,16 @@ def init_db():
     )
     """)
 
-    # 7. Payments
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        procurement_id INTEGER REFERENCES procurement_records(id) ON DELETE CASCADE,
+        amount REAL DEFAULT 0.0,
+        payment_status VARCHAR(20) DEFAULT 'PENDING',
+        transaction_reference VARCHAR(100),
+        payment_date TEXT
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         procurement_id INTEGER NOT NULL,
@@ -123,8 +274,17 @@ def init_db():
     )
     """)
 
-    # 8. Notifications
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        farmer_id INTEGER REFERENCES farmers(id) ON DELETE CASCADE,
+        booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
+        channel VARCHAR(10) NOT NULL,
+        message TEXT NOT NULL,
+        status VARCHAR(20) DEFAULT 'SENT',
+        sent_at TEXT NOT NULL
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         farmer_id INTEGER NOT NULL,
@@ -138,8 +298,17 @@ def init_db():
     )
     """)
 
-    # 9. Status History (for transparent timeline)
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS status_history (
+        id SERIAL PRIMARY KEY,
+        booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
+        old_status VARCHAR(30),
+        new_status VARCHAR(30) NOT NULL,
+        changed_by VARCHAR(50) DEFAULT 'SYSTEM',
+        timestamp TEXT NOT NULL,
+        remarks TEXT
+    )
+    """ if is_postgres() else """
     CREATE TABLE IF NOT EXISTS status_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         booking_id INTEGER NOT NULL,
@@ -156,7 +325,9 @@ def init_db():
 
     # Check if centres exist, if not seed database
     cursor.execute("SELECT COUNT(*) as count FROM centres")
-    if cursor.fetchone()["count"] == 0:
+    row = cursor.fetchone()
+    count = row["count"] if isinstance(row, dict) else row[0]
+    if count == 0:
         seed_data(conn)
 
     conn.close()
@@ -168,7 +339,6 @@ def seed_data(conn):
     tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
     day_after_str = (date.today() + timedelta(days=2)).isoformat()
 
-    # Seed APMC Centres
     centres = [
         ("Pune Central Grain Mandi (Hadapsar)", "PUN", "Hadapsar APMC Market Yard, Pune, MH", "Pune", 18.5089, 73.9260, 100, 1),
         ("Baramati Krishi Kendra", "BAR", "MIDC Area, Baramati, Dist. Pune, MH", "Pune", 18.1524, 74.5768, 80, 1),
@@ -180,11 +350,9 @@ def seed_data(conn):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, centres)
 
-    # Fetch centre IDs
     cursor.execute("SELECT id, code FROM centres")
     centre_map = {row["code"]: row["id"] for row in cursor.fetchall()}
 
-    # Create slots for today, tomorrow, day after
     time_windows = [
         ("08:00", "09:00", 20),
         ("09:00", "10:00", 20),
@@ -203,13 +371,11 @@ def seed_data(conn):
                     VALUES (?, ?, ?, ?, ?, 0, 'AVAILABLE')
                 """, (cid, d, start_t, end_t, cap))
 
-    # Seed initial demo farmers
     farmers_data = [
         ("Ramesh Jadhav", "9876543210", "Hadapsar", "Pune", "KID-4091-MH", "mr"),
         ("Suresh Patil", "9823456789", "Baramati Rural", "Pune", "KID-5102-MH", "hi"),
         ("Mahesh Shinde", "9812345678", "Daund Gaon", "Pune", "KID-6203-MH", "mr"),
         ("Ganesh Deshmukh", "9898989898", "Manchar", "Pune", "KID-7304-MH", "en"),
-        ("Vikram Pawar", "9765432100", "Narayangaon", "Pune", "KID-8405-MH", "mr"),
     ]
 
     for name, mob, vil, dist, ident, lang in farmers_data:
@@ -220,95 +386,11 @@ def seed_data(conn):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (uid, name, mob, vil, dist, ident, lang, now_iso))
 
-    # Seed Admin User
     cursor.execute("INSERT INTO users (phone, role, language, created_at) VALUES ('9999999999', 'ADMIN', 'en', ?)", (now_iso,))
-
-    # Seed bookings and procurement pipeline representing live APMC operation
-    pune_id = centre_map["PUN"]
-    cursor.execute("SELECT id FROM slots WHERE centre_id = ? AND date = ? ORDER BY start_time ASC", (pune_id, today_str))
-    pune_slots = [r["id"] for r in cursor.fetchall()]
-
-    ddmm = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d%m")
-
-    # Booking 1: Ramesh - Token PUN-ddmm-031 (Web) -> at 'WEIGHED' stage
-    cursor.execute("""
-        INSERT INTO bookings (farmer_id, centre_id, slot_id, token_number, booking_channel, booking_status, created_at)
-        VALUES (1, ?, ?, ?, 'WEB', 'BOOKED', ?)
-    """, (pune_id, pune_slots[0], f"PUN-{ddmm}-031", now_iso))
-    b1_id = cursor.lastrowid
-    cursor.execute("UPDATE slots SET booked_count = booked_count + 1 WHERE id = ?", (pune_slots[0],))
-    cursor.execute("""
-        INSERT INTO procurement_records (booking_id, crop, quantity, quality_result, procurement_status, quality_notes, created_at, updated_at)
-        VALUES (?, 'Wheat', 42.0, 'GRADE_A', 'WEIGHED', 'Moisture 11.2%, Foreign matter < 1%', ?, ?)
-    """, (b1_id, now_iso, now_iso))
-    pr1_id = cursor.lastrowid
-    cursor.execute("""
-        INSERT INTO payments (procurement_id, amount, payment_status, transaction_reference, payment_date)
-        VALUES (?, 96600.0, 'PROCESSING', 'PFMS-DEMO-82932', ?)
-    """, (pr1_id, today_str))
-
-    # Booking 2: Suresh - Token PUN-ddmm-032 (SMS) -> at 'QUALITY_CHECK' stage
-    cursor.execute("""
-        INSERT INTO bookings (farmer_id, centre_id, slot_id, token_number, booking_channel, booking_status, created_at)
-        VALUES (2, ?, ?, ?, 'SMS', 'BOOKED', ?)
-    """, (pune_id, pune_slots[0], f"PUN-{ddmm}-032", now_iso))
-    b2_id = cursor.lastrowid
-    cursor.execute("UPDATE slots SET booked_count = booked_count + 1 WHERE id = ?", (pune_slots[0],))
-    cursor.execute("""
-        INSERT INTO procurement_records (booking_id, crop, quantity, quality_result, procurement_status, quality_notes, created_at, updated_at)
-        VALUES (?, 'Soybean', 35.5, 'GRADE_B', 'QUALITY_CHECK', 'Testing grain cleanliness and moisture', ?, ?)
-    """, (b2_id, now_iso, now_iso))
-    pr2_id = cursor.lastrowid
-    cursor.execute("""
-        INSERT INTO payments (procurement_id, amount, payment_status)
-        VALUES (?, 163300.0, 'PENDING')
-    """, (pr2_id,))
-
-    # Booking 3: Mahesh - Token PUN-ddmm-033 (IVR) -> at 'ARRIVED' stage
-    cursor.execute("""
-        INSERT INTO bookings (farmer_id, centre_id, slot_id, token_number, booking_channel, booking_status, created_at)
-        VALUES (3, ?, ?, ?, 'IVR', 'BOOKED', ?)
-    """, (pune_id, pune_slots[1], f"PUN-{ddmm}-033", now_iso))
-    b3_id = cursor.lastrowid
-    cursor.execute("UPDATE slots SET booked_count = booked_count + 1 WHERE id = ?", (pune_slots[1],))
-    cursor.execute("""
-        INSERT INTO procurement_records (booking_id, crop, quantity, quality_result, procurement_status, quality_notes, created_at, updated_at)
-        VALUES (?, 'Gram (Chana)', 28.0, 'PENDING', 'ARRIVED', 'Gate entry verified', ?, ?)
-    """, (b3_id, now_iso, now_iso))
-
-    # Booking 4: Ganesh - Token PUN-ddmm-034 (Web) -> at 'SLOT_BOOKED' stage
-    cursor.execute("""
-        INSERT INTO bookings (farmer_id, centre_id, slot_id, token_number, booking_channel, booking_status, created_at)
-        VALUES (4, ?, ?, ?, 'WEB', 'BOOKED', ?)
-    """, (pune_id, pune_slots[1], f"PUN-{ddmm}-034", now_iso))
-    b4_id = cursor.lastrowid
-    cursor.execute("UPDATE slots SET booked_count = booked_count + 1 WHERE id = ?", (pune_slots[1],))
-    cursor.execute("""
-        INSERT INTO procurement_records (booking_id, crop, quantity, quality_result, procurement_status, quality_notes, created_at, updated_at)
-        VALUES (?, 'Wheat', 50.0, 'PENDING', 'SLOT_BOOKED', 'Awaiting arrival at Pune APMC', ?, ?)
-    """, (b4_id, now_iso, now_iso))
-
-    # Seed status timeline for Ramesh (PUN-ddmm-031)
-    timeline = [
-        ("SLOT_BOOKED", "Farmer registered slot via Web Portal", "2026-09-07T18:00:00"),
-        ("ARRIVED", "Arrived at Hadapsar APMC Gate #2", "2026-09-08T08:50:00"),
-        ("QUALITY_CHECK", "Grain moisture 11.2%, clean sample certified Grade A", "2026-09-08T09:12:00"),
-        ("WEIGHED", "Weighbridge Net: 42.0 Quintals (MSP @ 2,300/Q = ₹96,600)", "2026-09-08T09:35:00"),
-    ]
-    for st, rm, ts in timeline:
-        cursor.execute("""
-            INSERT INTO status_history (booking_id, old_status, new_status, changed_by, timestamp, remarks)
-            VALUES (?, NULL, ?, 'OFFICER_PATIL', ?, ?)
-        """, (b1_id, st, ts, rm))
-
-    # Notifications seed
-    cursor.execute("""
-        INSERT INTO notifications (farmer_id, booking_id, channel, message, status, sent_at)
-        VALUES (1, ?, 'SMS', ?, 'SENT', ?)
-    """, (b1_id, f"KisanSetu: Your token PUN-{ddmm}-031 is WEIGHED (42.0 Q). Payment of Rs 96,600 in process.", now_iso))
 
     conn.commit()
 
 if __name__ == "__main__":
     init_db()
-    print("Database initialized successfully at", DB_PATH)
+    db_type = "PostgreSQL (Supabase/Railway)" if is_postgres() else f"SQLite ({DB_PATH})"
+    print(f"Database initialized successfully using: {db_type}")

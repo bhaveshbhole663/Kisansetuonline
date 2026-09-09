@@ -1,0 +1,7 @@
+{
+  "buildCommand": "cd kisansetu/frontend && npm install && npm run build",
+  "outputDirectory": "kisansetu/frontend/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
