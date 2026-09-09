@@ -1,1 +1,1 @@
-cd kisansetu/backend&& python -m uvicorn main:app --host 0.0.0.0 --port 8080
+cd kisansetu/backend&& python3 -m uvicorn main:app --host 0.0.0.0 --port 8080
