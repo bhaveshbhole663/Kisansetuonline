@@ -63,38 +63,76 @@ def login(req: LoginRequest):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT * FROM users WHERE phone = ?", (req.phone,))
-        user = cursor.fetchone()
-        if not user:
-            # If farmer logging in for demo, auto-register quick demo profile
-            if req.role == "FARMER":
-                now_iso = datetime.now().isoformat()
-                cursor.execute("""
-                    INSERT INTO users (phone, role, language, created_at)
-                    VALUES (?, 'FARMER', 'hi', ?)
-                """, (req.phone, now_iso))
-                user_id = cursor.lastrowid
-                ident_ref = f"KID-{req.phone[-4:]}-MH"
-                cursor.execute("""
-                    INSERT INTO farmers (user_id, name, mobile, village, district, identity_reference, preferred_language, created_at)
-                    VALUES (?, ?, ?, 'Hadapsar', 'Pune', ?, 'hi', ?)
-                """, (user_id, f"Farmer {req.phone[-4:]}", req.phone, ident_ref, now_iso))
-                farmer_id = cursor.lastrowid
-                conn.commit()
-                return {
-                    "success": True,
-                    "token": f"token-{req.phone}",
-                    "user": {"id": user_id, "phone": req.phone, "role": "FARMER", "language": "hi"},
-                    "farmer": {"id": farmer_id, "name": f"Farmer {req.phone[-4:]}", "mobile": req.phone, "village": "Hadapsar", "identity_reference": ident_ref}
-                }
-            elif req.role == "ADMIN" and req.phone == "9999999999":
+        # Admin authentication flow
+        if req.role == "ADMIN":
+            admin_identifiers = ["9999999999", "admin", "admin@apmc.gov.in", "9876500000"]
+            valid_pins = ["admin123", "1234", "admin", "9999", ""]
+            
+            clean_phone = req.phone.strip()
+            if clean_phone in admin_identifiers or clean_phone.lower() == "admin":
+                if req.pin and req.pin.strip() not in valid_pins:
+                    raise HTTPException(status_code=401, detail="Invalid APMC Admin Passcode / PIN")
+                
                 return {
                     "success": True,
                     "token": "admin-token-99999",
-                    "user": {"id": 1, "phone": req.phone, "role": "ADMIN", "language": "en"}
+                    "user": {
+                        "id": 1,
+                        "phone": clean_phone,
+                        "name": "Shri R. K. Deshmukh",
+                        "role": "ADMIN",
+                        "designation": "Chief Mandi Procurement Officer",
+                        "centre_id": 1,
+                        "centre_name": "Pune Central Grain Mandi (Hadapsar)",
+                        "language": "en"
+                    }
                 }
             else:
-                raise HTTPException(status_code=404, detail="User not found")
+                raise HTTPException(status_code=401, detail="Invalid APMC Staff ID or Unauthorized Role")
+
+        # Farmer authentication flow
+        cursor.execute("SELECT * FROM users WHERE phone = ?", (req.phone,))
+        user = cursor.fetchone()
+        if not user:
+            # Auto-register farmer if first time entering mobile
+            now_iso = datetime.now().isoformat()
+            cursor.execute("""
+                INSERT INTO users (phone, role, language, created_at)
+                VALUES (?, 'FARMER', 'hi', ?)
+            """, (req.phone, now_iso))
+            user_id = cursor.lastrowid
+            ident_ref = f"KID-{req.phone[-4:]}-MH"
+            
+            # Check demo names
+            demo_names = {
+                "9876543210": ("Ramesh Jadhav", "Hadapsar", "Pune"),
+                "9823456789": ("Suresh Patil", "Baramati Rural", "Pune"),
+                "9812345678": ("Mahesh Shinde", "Daund Gaon", "Pune")
+            }
+            default_info = demo_names.get(req.phone, (f"Farmer {req.phone[-4:]}", "Hadapsar", "Pune"))
+            
+            cursor.execute("""
+                INSERT INTO farmers (user_id, name, mobile, village, district, identity_reference, preferred_language, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'hi', ?)
+            """, (user_id, default_info[0], req.phone, default_info[1], default_info[2], ident_ref, now_iso))
+            farmer_id = cursor.lastrowid
+            conn.commit()
+            
+            return {
+                "success": True,
+                "token": f"token-{req.phone}",
+                "user": {"id": user_id, "phone": req.phone, "role": "FARMER", "language": "hi"},
+                "farmer": {
+                    "id": farmer_id,
+                    "user_id": user_id,
+                    "name": default_info[0],
+                    "mobile": req.phone,
+                    "village": default_info[1],
+                    "district": default_info[2],
+                    "identity_reference": ident_ref,
+                    "preferred_language": "hi"
+                }
+            }
 
         farmer_data = None
         if user["role"] == "FARMER":
@@ -102,6 +140,24 @@ def login(req: LoginRequest):
             f_row = cursor.fetchone()
             if f_row:
                 farmer_data = dict(f_row)
+            else:
+                ident_ref = f"KID-{user['phone'][-4:]}-MH"
+                cursor.execute("""
+                    INSERT INTO farmers (user_id, name, mobile, village, district, identity_reference, preferred_language, created_at)
+                    VALUES (?, ?, ?, 'Hadapsar', 'Pune', ?, 'hi', ?)
+                """, (user["id"], f"Farmer {user['phone'][-4:]}", user["phone"], ident_ref, datetime.now().isoformat()))
+                farmer_id = cursor.lastrowid
+                conn.commit()
+                farmer_data = {
+                    "id": farmer_id,
+                    "user_id": user["id"],
+                    "name": f"Farmer {user['phone'][-4:]}",
+                    "mobile": user["phone"],
+                    "village": "Hadapsar",
+                    "district": "Pune",
+                    "identity_reference": ident_ref,
+                    "preferred_language": "hi"
+                }
 
         return {
             "success": True,

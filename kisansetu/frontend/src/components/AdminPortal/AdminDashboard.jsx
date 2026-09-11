@@ -15,11 +15,12 @@ import {
   RefreshCw,
   UserPlus,
   Building2,
-  CreditCard
+  CreditCard,
+  LogOut
 } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const { refreshKey, triggerRefresh } = useApp();
+  const { refreshKey, triggerRefresh, logoutAdmin, adminUser, t } = useApp();
   const [loading, setLoading] = useState(true);
   const [queue, setQueue] = useState([]);
   const [metrics, setMetrics] = useState({});
@@ -121,9 +122,19 @@ export default function AdminDashboard() {
           <button
             onClick={loadDashboardData}
             title="Refresh Live Queue"
-            className="p-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 transition-colors"
+            className="p-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* Admin Logout */}
+          <button
+            onClick={logoutAdmin}
+            title={t('logout')}
+            className="px-3 py-2 border border-rose-200 bg-rose-50/70 hover:bg-rose-100 rounded-xl text-rose-700 transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5 text-rose-600" />
+            <span className="hidden sm:inline">{t('logout')}</span>
           </button>
         </div>
       </div>

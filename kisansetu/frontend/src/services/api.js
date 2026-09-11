@@ -153,23 +153,72 @@ function saveMockStore(store) {
 // --- Unified API Service with Fallback Logic ---
 export const api = {
   // Auth
-  async login(phone, role = 'FARMER') {
+  async login(phone, role = 'FARMER', pin = '') {
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, role }),
+        body: JSON.stringify({ phone, role, pin }),
       });
       if (res.ok) return await res.json();
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Authentication failed');
     } catch (e) {
-      // Fallback
+      if (e.message && e.message.includes('Invalid')) {
+        throw e;
+      }
+      // Offline / Static fallback
+      if (role === 'ADMIN') {
+        const cleanPhone = (phone || '').trim();
+        const validIds = ['9999999999', 'admin', 'admin@apmc.gov.in', '9876500000'];
+        const validPins = ['admin123', '1234', 'admin', '9999', ''];
+        
+        if (validIds.includes(cleanPhone) || cleanPhone.toLowerCase() === 'admin') {
+          if (pin && !validPins.includes(pin.trim())) {
+            throw new Error('Invalid APMC Admin Passcode / PIN');
+          }
+          return {
+            success: true,
+            token: 'admin-token-99999',
+            user: {
+              id: 1,
+              phone: cleanPhone || '9999999999',
+              name: 'Shri R. K. Deshmukh',
+              role: 'ADMIN',
+              designation: 'Chief Mandi Procurement Officer',
+              centre_id: 1,
+              centre_name: 'Pune Central Grain Mandi (Hadapsar)',
+              language: 'en'
+            }
+          };
+        } else {
+          throw new Error('Invalid APMC Staff ID or Unauthorized Role');
+        }
+      }
+
+      // Farmer Fallback
+      const demoNames = {
+        '9876543210': { id: 1, name: 'Ramesh Jadhav', village: 'Hadapsar', district: 'Pune', identity_reference: 'KID-4091-MH' },
+        '9823456789': { id: 2, name: 'Suresh Patil', village: 'Baramati Rural', district: 'Pune', identity_reference: 'KID-5102-MH' },
+        '9812345678': { id: 3, name: 'Mahesh Shinde', village: 'Daund Gaon', district: 'Pune', identity_reference: 'KID-6203-MH' },
+        '9898989898': { id: 4, name: 'Ganesh Deshmukh', village: 'Manchar', district: 'Pune', identity_reference: 'KID-7304-MH' }
+      };
+
+      const found = demoNames[phone] || {
+        id: Date.now(),
+        name: `Farmer ${phone.slice(-4)}`,
+        village: 'Hadapsar',
+        district: 'Pune',
+        identity_reference: `KID-${phone.slice(-4)}-MH`
+      };
+
+      return {
+        success: true,
+        token: `token-${phone}`,
+        user: { id: found.id, phone, role: 'FARMER', language: 'hi' },
+        farmer: { ...found, mobile: phone }
+      };
     }
-    return {
-      success: true,
-      token: `token-${phone}`,
-      user: { id: 1, phone, role, language: 'hi' },
-      farmer: { id: 1, name: `Farmer ${phone.slice(-4)}`, mobile: phone, village: 'Hadapsar', identity_reference: `KID-${phone.slice(-4)}-MH` }
-    };
   },
 
   async registerFarmer(data) {

@@ -165,7 +165,26 @@ def run_tests():
     assert "channel_breakdown" in ana_data
     print("[PASS] Test 10: Operational analytics & channel breakdowns verified.")
 
-    print("\n=== ALL 10 TESTS PASSED SUCCESSFULLY! ===")
+    # Test 11: Authentication & Role Gate
+    # 11a: Admin Login with valid credentials
+    admin_res = client.post("/api/auth/login", json={"phone": "9999999999", "role": "ADMIN", "pin": "admin123"})
+    assert admin_res.status_code == 200
+    admin_data = admin_res.json()
+    assert admin_data["user"]["role"] == "ADMIN"
+    assert "token" in admin_data
+
+    # 11b: Admin Login with invalid PIN
+    bad_admin = client.post("/api/auth/login", json={"phone": "9999999999", "role": "ADMIN", "pin": "wrongpin"})
+    assert bad_admin.status_code == 401
+
+    # 11c: Farmer Login
+    farmer_res = client.post("/api/auth/login", json={"phone": "9876543210", "role": "FARMER"})
+    assert farmer_res.status_code == 200
+    farmer_data = farmer_res.json()
+    assert farmer_data["farmer"]["name"] == "Ramesh Jadhav"
+    print("[PASS] Test 11: Farmer and Admin role-based logins verified with PIN validation.")
+
+    print("\n=== ALL 11 TESTS PASSED SUCCESSFULLY! ===")
 
 if __name__ == "__main__":
     run_tests()

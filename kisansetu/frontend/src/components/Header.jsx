@@ -7,11 +7,26 @@ import {
   PhoneCall, 
   Network, 
   Globe, 
-  CheckCircle2 
+  CheckCircle2,
+  LogOut,
+  User,
+  Shield
 } from 'lucide-react';
 
 export default function Header() {
-  const { language, setLanguage, t, activeTab, setActiveTab } = useApp();
+  const { 
+    language, 
+    setLanguage, 
+    t, 
+    activeTab, 
+    setActiveTab,
+    isFarmerAuthenticated,
+    currentFarmer,
+    logoutFarmer,
+    isAdminAuthenticated,
+    adminUser,
+    logoutAdmin
+  } = useApp();
 
   const navItems = [
     { id: 'farmer', label: t('nav_farmer'), icon: Sprout, color: 'text-emerald-600' },
@@ -47,10 +62,40 @@ export default function Header() {
         {/* System & Language Controls */}
         <div className="flex items-center gap-3">
           {/* Architecture Badge */}
-          <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+          <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            <span>FastAPI + PostgreSQL/SQLite Engine</span>
+            <span>FastAPI + PostgreSQL Engine</span>
           </div>
+
+          {/* User Auth Chip */}
+          {activeTab === 'farmer' && isFarmerAuthenticated && (
+            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 px-3 py-1 rounded-xl text-xs">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+              <div className="font-semibold">{currentFarmer?.name}</div>
+              <span className="text-[10px] text-emerald-700 font-mono hidden sm:inline">({currentFarmer?.identity_reference})</span>
+              <button
+                onClick={logoutFarmer}
+                title={t('switch_account')}
+                className="ml-1 text-slate-400 hover:text-rose-600 transition-colors p-0.5 rounded cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'admin' && isAdminAuthenticated && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-900 px-3 py-1 rounded-xl text-xs">
+              <Shield className="w-3.5 h-3.5 text-amber-700" />
+              <div className="font-semibold truncate max-w-[140px]">{adminUser?.name || 'Mandi In-Charge'}</div>
+              <button
+                onClick={logoutAdmin}
+                title={t('logout')}
+                className="ml-1 text-slate-400 hover:text-rose-600 transition-colors p-0.5 rounded cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Language Selector */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">

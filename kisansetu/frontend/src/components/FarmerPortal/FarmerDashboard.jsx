@@ -15,11 +15,12 @@ import {
   RefreshCw,
   Bell,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  LogOut
 } from 'lucide-react';
 
 export default function FarmerDashboard() {
-  const { currentFarmer, t, refreshKey, triggerRefresh } = useApp();
+  const { currentFarmer, t, refreshKey, triggerRefresh, logoutFarmer } = useApp();
   const [isBookModalOpen, setIsBookModalOpen] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -90,9 +91,18 @@ export default function FarmerDashboard() {
             <button
               onClick={loadFarmerBookings}
               title="Refresh"
-              className="w-11 h-11 rounded-2xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all"
+              className="w-11 h-11 rounded-2xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            <button
+              onClick={logoutFarmer}
+              title={t('switch_account')}
+              className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-2xl flex items-center gap-1.5 text-xs transition-all cursor-pointer border border-white/20"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('switch_account')}</span>
             </button>
           </div>
         </div>

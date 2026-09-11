@@ -57,6 +57,28 @@ def get_centre_slots(centre_id: int, target_date: str = Query(default=None)):
         """, (centre_id, target_date))
         slots = [dict(s) for s in cursor.fetchall()]
 
+        if not slots:
+            time_windows = [
+                ("08:00", "09:00", 20),
+                ("09:00", "10:00", 20),
+                ("10:00", "11:00", 20),
+                ("11:00", "12:00", 20),
+                ("13:00", "14:00", 20),
+                ("14:00", "15:00", 20),
+            ]
+            for start_t, end_t, cap in time_windows:
+                cursor.execute("""
+                    INSERT INTO slots (centre_id, date, start_time, end_time, capacity, booked_count, status)
+                    VALUES (?, ?, ?, ?, ?, 0, 'AVAILABLE')
+                """, (centre_id, target_date, start_t, end_t, cap))
+            conn.commit()
+            cursor.execute("""
+                SELECT * FROM slots
+                WHERE centre_id = ? AND date = ?
+                ORDER BY start_time ASC
+            """, (centre_id, target_date))
+            slots = [dict(s) for s in cursor.fetchall()]
+
         # Check Smart Slot Recommendation
         recommendations = []
         # Find slots with lowest load

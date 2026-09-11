@@ -10,15 +10,69 @@ const AppContext = createContext();
 export function AppProvider({ children }) {
   const [language, setLanguage] = useState('hi'); // Default Hindi per PRD
   const [activeTab, setActiveTab] = useState('farmer'); // 'farmer', 'admin', 'sms', 'ivr', 'arch'
-  const [currentFarmer, setCurrentFarmer] = useState({
-    id: 1,
-    name: 'Ramesh Jadhav',
-    mobile: '9876543210',
-    village: 'Hadapsar',
-    district: 'Pune',
-    identity_reference: 'KID-4091-MH',
-    preferred_language: 'mr'
+  
+  // Farmer Authentication State
+  const [isFarmerAuthenticated, setIsFarmerAuthenticated] = useState(() => {
+    return localStorage.getItem('kisansetu_farmer_auth') === 'true';
   });
+
+  const [currentFarmer, setCurrentFarmer] = useState(() => {
+    const saved = localStorage.getItem('kisansetu_farmer_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {
+      id: 1,
+      name: 'Ramesh Jadhav',
+      mobile: '9876543210',
+      village: 'Hadapsar',
+      district: 'Pune',
+      identity_reference: 'KID-4091-MH',
+      preferred_language: 'mr'
+    };
+  });
+
+  // Admin Authentication State
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    return localStorage.getItem('kisansetu_admin_auth') === 'true';
+  });
+
+  const [adminUser, setAdminUser] = useState(() => {
+    const saved = localStorage.getItem('kisansetu_admin_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return null;
+  });
+
+  const loginFarmer = (farmerData) => {
+    setCurrentFarmer(farmerData);
+    setIsFarmerAuthenticated(true);
+    localStorage.setItem('kisansetu_farmer_auth', 'true');
+    localStorage.setItem('kisansetu_farmer_user', JSON.stringify(farmerData));
+    if (farmerData.preferred_language) {
+      setLanguage(farmerData.preferred_language);
+    }
+  };
+
+  const logoutFarmer = () => {
+    setIsFarmerAuthenticated(false);
+    localStorage.removeItem('kisansetu_farmer_auth');
+  };
+
+  const loginAdmin = (userData) => {
+    setAdminUser(userData);
+    setIsAdminAuthenticated(true);
+    localStorage.setItem('kisansetu_admin_auth', 'true');
+    localStorage.setItem('kisansetu_admin_user', JSON.stringify(userData));
+  };
+
+  const logoutAdmin = () => {
+    setAdminUser(null);
+    setIsAdminAuthenticated(false);
+    localStorage.removeItem('kisansetu_admin_auth');
+    localStorage.removeItem('kisansetu_admin_user');
+  };
   const [refreshKey, setRefreshKey] = useState(0);
   const [systemEvents, setSystemEvents] = useState([
     {
@@ -91,6 +145,13 @@ export function AppProvider({ children }) {
         setActiveTab,
         currentFarmer,
         setCurrentFarmer,
+        isFarmerAuthenticated,
+        isAdminAuthenticated,
+        adminUser,
+        loginFarmer,
+        logoutFarmer,
+        loginAdmin,
+        logoutAdmin,
         refreshKey,
         triggerRefresh,
         systemEvents

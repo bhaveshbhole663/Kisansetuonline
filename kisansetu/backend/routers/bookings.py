@@ -14,20 +14,23 @@ def generate_token(cursor, centre_code: str, slot_date: str) -> str:
     cursor.execute("""
         SELECT token_number FROM bookings 
         WHERE token_number LIKE ? 
-        ORDER BY id DESC LIMIT 1
+        ORDER BY id DESC
     """, (f"{prefix}%",))
-    last_token = cursor.fetchone()
+    rows = cursor.fetchall()
 
-    if last_token:
-        try:
-            last_seq = int(last_token["token_number"].split("-")[-1])
-            new_seq = last_seq + 1
-        except Exception:
-            new_seq = 35
-    else:
-        new_seq = 35
+    max_seq = 30
+    for r in rows:
+        suffix = r["token_number"].split("-")[-1]
+        if suffix.isdigit():
+            max_seq = max(max_seq, int(suffix))
 
-    return f"{prefix}{str(new_seq).zfill(3)}"
+    new_seq = max_seq + 1
+    while True:
+        candidate = f"{prefix}{str(new_seq).zfill(3)}"
+        cursor.execute("SELECT id FROM bookings WHERE token_number = ?", (candidate,))
+        if not cursor.fetchone():
+            return candidate
+        new_seq += 1
 
 @router.post("")
 def create_booking(req: BookingCreateRequest):

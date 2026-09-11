@@ -11,6 +11,7 @@ class FarmerRegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     phone: str
     role: Optional[str] = "FARMER"
+    pin: Optional[str] = None
 
 class BookingCreateRequest(BaseModel):
     farmer_id: Optional[int] = None

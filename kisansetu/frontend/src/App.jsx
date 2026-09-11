@@ -2,21 +2,27 @@ import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Header from './components/Header';
 import FarmerDashboard from './components/FarmerPortal/FarmerDashboard';
+import FarmerLogin from './components/FarmerPortal/FarmerLogin';
 import AdminDashboard from './components/AdminPortal/AdminDashboard';
+import AdminLogin from './components/AdminPortal/AdminLogin';
 import SMSPhoneSimulator from './components/Simulators/SMSPhoneSimulator';
 import IVRPhoneSimulator from './components/Simulators/IVRPhoneSimulator';
 import SystemArchitectureViewer from './components/SystemArchitectureViewer';
 
 function MainContent() {
-  const { activeTab, setActiveTab } = useApp();
+  const { activeTab, setActiveTab, isFarmerAuthenticated, isAdminAuthenticated } = useApp();
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       <Header />
 
       <main className="flex-1 pb-12">
-        {activeTab === 'farmer' && <FarmerDashboard />}
-        {activeTab === 'admin' && <AdminDashboard />}
+        {activeTab === 'farmer' && (
+          isFarmerAuthenticated ? <FarmerDashboard /> : <FarmerLogin />
+        )}
+        {activeTab === 'admin' && (
+          isAdminAuthenticated ? <AdminDashboard /> : <AdminLogin />
+        )}
         {activeTab === 'sms' && <SMSPhoneSimulator />}
         {activeTab === 'ivr' && <IVRPhoneSimulator />}
         {activeTab === 'arch' && <SystemArchitectureViewer />}

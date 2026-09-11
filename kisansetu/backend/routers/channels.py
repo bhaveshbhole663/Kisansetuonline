@@ -165,8 +165,28 @@ def handle_sms_webhook(req: SMSWebhookRequest):
             avail_slots = [dict(s) for s in cursor.fetchall()]
 
             if not avail_slots:
-                SMS_SESSIONS.pop(phone, None)
-                return {"reply": f"All slots on {selected_date} at {session['centre_name']} are full. Please reply 'BOOK' and choose another date or centre."}
+                # Dynamically seed slots if date had no slots
+                time_windows = [
+                    ("08:00", "09:00", 20),
+                    ("09:00", "10:00", 20),
+                    ("10:00", "11:00", 20),
+                    ("11:00", "12:00", 20),
+                    ("13:00", "14:00", 20),
+                    ("14:00", "15:00", 20),
+                ]
+                for start_t, end_t, cap in time_windows:
+                    cursor.execute("""
+                        INSERT INTO slots (centre_id, date, start_time, end_time, capacity, booked_count, status)
+                        VALUES (?, ?, ?, ?, ?, 0, 'AVAILABLE')
+                    """, (session["centre_id"], selected_date, start_t, end_t, cap))
+                conn.commit()
+                cursor.execute("""
+                    SELECT id, start_time, end_time, capacity, booked_count 
+                    FROM slots 
+                    WHERE centre_id = ? AND date = ? AND booked_count < capacity
+                    ORDER BY start_time ASC
+                """, (session["centre_id"], selected_date))
+                avail_slots = [dict(s) for s in cursor.fetchall()]
 
             session["slots"] = avail_slots
             SMS_SESSIONS[phone] = session
@@ -344,6 +364,29 @@ def handle_ivr_webhook(req: IVRWebhookRequest):
                 ORDER BY start_time ASC LIMIT 3
             """, (centre["id"], today_str))
             slots = [dict(s) for s in cursor.fetchall()]
+
+            if not slots:
+                time_windows = [
+                    ("08:00", "09:00", 20),
+                    ("09:00", "10:00", 20),
+                    ("10:00", "11:00", 20),
+                    ("11:00", "12:00", 20),
+                    ("13:00", "14:00", 20),
+                    ("14:00", "15:00", 20),
+                ]
+                for start_t, end_t, cap in time_windows:
+                    cursor.execute("""
+                        INSERT INTO slots (centre_id, date, start_time, end_time, capacity, booked_count, status)
+                        VALUES (?, ?, ?, ?, ?, 0, 'AVAILABLE')
+                    """, (centre["id"], today_str, start_t, end_t, cap))
+                conn.commit()
+                cursor.execute("""
+                    SELECT id, start_time, end_time, capacity, booked_count 
+                    FROM slots WHERE centre_id = ? AND date = ? AND booked_count < capacity
+                    ORDER BY start_time ASC LIMIT 3
+                """, (centre["id"], today_str))
+                slots = [dict(s) for s in cursor.fetchall()]
+
             slot_prompt = f"Selected {centre['name']}. Select Slot. " + ". ".join([f"Press {idx+1} for {s['start_time']} to {s['end_time']}" for idx, s in enumerate(slots)])
 
             return {
